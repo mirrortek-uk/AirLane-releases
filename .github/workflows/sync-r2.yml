@@ -1,0 +1,42 @@
+name: Sync release to R2
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to sync (leave empty for the event tag)"
+        required: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve tag
+        id: tag
+        run: |
+          T="${{ inputs.tag || github.event.release.tag_name }}"
+          [ -z "$T" ] && T=$(gh release view --repo ${{ github.repository }} --json tagName -q .tagName)
+          echo "tag=$T" >> "$GITHUB_OUTPUT"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p dist
+          gh release download "${{ steps.tag.outputs.tag }}" \
+            --repo ${{ github.repository }} --dir dist --clobber
+          ls -la dist
+
+      - name: Upload assets to R2
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+        run: |
+          aws s3 cp dist "s3://${{ secrets.R2_BUCKET }}/" --recursive \
+            --endpoint-url "https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com" \
+            --no-progress
